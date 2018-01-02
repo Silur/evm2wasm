@@ -1,19 +1,14 @@
 # SYNOPSIS 
-[![NPM Package](https://img.shields.io/npm/v/evm2wasm.svg?style=flat-square)](https://www.npmjs.org/package/evm2wasm)
-[![Build Status](https://img.shields.io/travis/ewasm/evm2wasm.svg?branch=master&style=flat-square)](https://travis-ci.org/ewasm/evm2wasm)
+GNU C Standard code
 
-[![js-standard-style](https://cdn.rawgit.com/feross/standard/master/badge.svg)](https://github.com/feross/standard)  
-
-EVM (Ethereum VM 1.0) to [eWASM](https://github.com/ethereum/evm2.0-design) transcompiler. Here is a online [frontend](https://ewasm.github.io/evm2wasm-frontend/dist/).
+EVM (Ethereum VM 1.0) to [eWASM](https://github.com/ethereum/evm2.0-design) transcompiler.
 
 # INSTALL
-`npm install evm2wasm`
+`make`
 
 # DEVELOP
-* After any changes to `.wast` file, `npm  run build` need to be run to compile the files into a .json file 
-* To rebuild the documetion run `npm run build:docs`
-* To lint run `npm run lint`
-* And make sure you test with `npm test` and `npm run vmTests` which runs the offical Ethereum test suite
+* To lint run `make lint`
+* To test run `make test`
 
 # API
 [./docs/](./docs/index.md)
