@@ -39,7 +39,7 @@
     "transcompiler"
   ],
   "dependencies": {
-    "ethereumjs-util": "^5.1.2",
+    "ethereumjs-util": "5.1.2",
     "wast2wasm": "0.0.1"
   },
   "standard": {
