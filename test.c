@@ -27,5 +27,9 @@ main(int argc, char *argv[])
 	
 	evm2wasm(evm_bytecode, fsize, wast_buffer);
 
+	wast_output = fopen("out.wast", "w");
+	fputs(wast_buffer, wast_output);
+	fclose(wast_output);
+
 	return 0;
 }
