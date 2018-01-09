@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MAXBUFFERLEN 8192
 int
 main(int argc, char *argv[])
 {
@@ -15,14 +16,14 @@ main(int argc, char *argv[])
 	FILE *evm_input = fopen(argv[1], "r");
 	FILE *wast_output;
 	char *evm_bytecode;
-	char *wast_buffer;
+	char *wast_buffer = calloc(MAXBUFFERLEN, sizeof(char));
 
-	fseek(input, 0, SEEK_END); 
+	fseek(evm_input, 0, SEEK_END); 
 	fsize = ftell(evm_input);
 	rewind(evm_input);
 	
 	evm_bytecode = calloc(fsize, sizeof(char));
-	fgets(evm_bytecode, fsize, evm_input);
+	evm_bytecode = fgets(evm_bytecode, fsize, evm_input);
 	fclose(evm_input);
 	
 	evm2wasm(evm_bytecode, fsize, wast_buffer);
