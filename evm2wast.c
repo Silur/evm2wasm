@@ -118,7 +118,6 @@ int evm2wasm(char *evm_code, size_t len, char *wast_code)
 			case 0x0b:
 				load_gadget("SIGNEXTEND");
 				break;
-
 			case 0x10:
 				load_gadget("LT");
 				break;
