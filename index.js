@@ -2,7 +2,8 @@ const BN = require('bn.js')
 const wast2wasm = require('wast2wasm')
 const ethUtil = require('ethereumjs-util')
 const opcodes = require('./opcodes.js')
-const wastFiles = require('./wasm/wast.json')
+const wastSyncInterface = require('./wasm/wast.json')
+const wastAsyncInterface = require('./wasm/wast-async.json')
 const wabt = require('./wabt.js')
 
 // map to track dependent WASM functions
@@ -43,7 +44,7 @@ const depMap = new Map([
   ['CREATE', ['bswap_m256', 'bswap_m160', 'callback_160', 'memusegas', 'check_overflow']],
   ['RETURN', ['memusegas', 'check_overflow']],
   ['BALANCE', ['bswap_m256', 'callback_128']],
-  ['SUICIDE', ['bswap_m256']],
+  ['SELFDESTRUCT', ['bswap_m256']],
   ['SSTORE', ['bswap_m256', 'callback']],
   ['SLOAD', ['callback_256']],
   ['CODESIZE', ['callback_32']],
@@ -82,6 +83,7 @@ const callbackFuncs = new Map([
  */
 exports.evm2wasm = function (evmCode, opts = {
   'stackTrace': false,
+  'useAsyncAPI': false,
   'inlineOps': true,
   'testName': 'temp'
 }) {
@@ -115,6 +117,7 @@ exports.evm2wasm = function (evmCode, opts = {
  */
 exports.evm2wast = function (evmCode, opts = {
   'stackTrace': false,
+  'useAsyncAPI': false,
   'inlineOps': true
 }) {
   // adds stack height checks to the beginning of a segment
@@ -151,7 +154,7 @@ exports.evm2wast = function (evmCode, opts = {
   // to figure out what .wast files to include
   const opcodesUsed = new Set()
   const ignoredOps = new Set(['JUMP', 'JUMPI', 'JUMPDEST', 'POP', 'STOP', 'INVALID'])
-  const callbackTable = []
+  let callbackTable = []
 
   // an array of found segments
   const jumpSegments = []
@@ -275,7 +278,7 @@ exports.evm2wast = function (evmCode, opts = {
           pc = evmCode.length
         }
         break
-      case 'SUICIDE':
+      case 'SELFDESTRUCT':
       case 'RETURN':
         segment += `(call $${op.name}) (br $done)\n`
         if (jumpFound) {
@@ -290,7 +293,7 @@ exports.evm2wast = function (evmCode, opts = {
         pc = findNextJumpDest(evmCode, pc)
         break
       default:
-        if (callbackFuncs.has(op.name)) {
+        if (opts.useAsyncAPI && callbackFuncs.has(op.name)) {
           const cbFunc = callbackFuncs.get(op.name)
           let index = callbackTable.indexOf(cbFunc)
           if (index === -1) {
@@ -298,6 +301,7 @@ exports.evm2wast = function (evmCode, opts = {
           }
           segment += `(call $${op.name} (i32.const ${index}))\n`
         } else {
+          // use synchronous API
           segment += `(call $${op.name})\n`
         }
     }
@@ -314,12 +318,12 @@ exports.evm2wast = function (evmCode, opts = {
 
     // creates a stack trace
     if (opts.stackTrace) {
-      segment += `(call $stackTrace (get_global $sp) (i32.const ${opint}))\n`
+      segment += `(call $stackTrace (i32.const ${pc}) (i32.const ${opint}) (i32.const ${gasCount}) (get_global $sp))\n`
     }
 
     // adds the logic to save the stack pointer before exiting to wiat to for a callback
     // note, this must be done before the sp is updated above^
-    if (callbackFuncs.has(op.name)) {
+    if (opts.useAsyncAPI && callbackFuncs.has(op.name)) {
       segment += `(set_global $cb_dest (i32.const ${jumpSegments.length + 1}))
           (br $done))`
       jumpSegments.push({
@@ -332,23 +336,28 @@ exports.evm2wast = function (evmCode, opts = {
 
   wast = assembleSegments(jumpSegments) + wast + '))'
 
+  let wastFiles = wastSyncInterface // default to synchronous interface
+  if (opts.useAsyncAPI) {
+    wastFiles = wastAsyncInterface
+  }
+
   let imports = []
   let funcs = []
   // inline EVM opcode implemention
   if (opts.inlineOps) {
-    [funcs, imports] = exports.resolveFunctions(opcodesUsed)
+    [funcs, imports] = exports.resolveFunctions(opcodesUsed, wastFiles)
   }
 
   // import stack trace function
   if (opts.stackTrace) {
     imports.push('(import "debug" "printMemHex" (func $printMem (param i32 i32)))')
     imports.push('(import "debug" "print" (func $print (param i32)))')
-    imports.push('(import "debug" "evmStackTrace" (func $stackTrace (param i32 i32)))')
+    imports.push('(import "debug" "evmTrace" (func $stackTrace (param i32 i32 i32 i32)))')
   }
   imports.push('(import "ethereum" "useGas" (func $useGas (param i64)))')
 
   funcs.push(wast)
-  wast = exports.buildModule(funcs, imports, [], callbackTable)
+  wast = exports.buildModule(funcs, imports, callbackTable)
   return wast
 }
 
@@ -461,7 +470,7 @@ function resolveFunctionDeps (funcSet) {
  * @param {Set} funcSet
  * @return {Array}
  */
-exports.resolveFunctions = function (funcSet) {
+exports.resolveFunctions = function (funcSet, wastFiles) {
   let funcs = []
   let imports = []
   for (let func of resolveFunctionDeps(funcSet)) {
@@ -477,14 +486,22 @@ exports.resolveFunctions = function (funcSet) {
  * @param {Array} imports the imports for the module's import table
  * @return {string}
  */
-exports.buildModule = function (funcs, imports = [], exports = [], cbs = []) {
+exports.buildModule = function (funcs, imports = [], callbacks = []) {
   let funcStr = ''
   for (let func of funcs) {
     funcStr += func
   }
-  for (let exprt of exports) {
-    funcStr += `(export "${exprt}" (func $${exprt}))`
+
+  let callbackTableStr = ''
+  if (callbacks.length) {
+    callbackTableStr = `
+    (table
+      (export "callback") ;; name of table
+        anyfunc
+        (elem ${callbacks.join(' ')}) ;; elements will have indexes in order
+      )`
   }
+
   return `
 (module
   ${imports.join('\n')}
@@ -503,11 +520,8 @@ exports.buildModule = function (funcs, imports = [], exports = [], cbs = []) {
   (memory 500)
   (export "memory" (memory 0))
 
-  (table
-    (export "callback")
-    anyfunc
-    (elem ${cbs.join(' ')})
-  )
-   ${funcStr}
+  ${callbackTableStr}
+
+  ${funcStr}
 )`
 }
